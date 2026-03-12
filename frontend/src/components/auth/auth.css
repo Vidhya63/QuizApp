@@ -1,0 +1,407 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ═══════════════════════════════════════════════════════════
+   RESET
+═══════════════════════════════════════════════════════════ */
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE SHELL — centers the card on screen
+═══════════════════════════════════════════════════════════ */
+.auth-page-container {
+    min-height: 100vh;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #060910;
+    padding: 24px 16px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   WRAPPER — 980 × 600 card
+═══════════════════════════════════════════════════════════ */
+.auth-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 980px;
+    height: 600px;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #0d1117;          /* navy base */
+    box-shadow:
+        0 0 0 1px rgba(0, 212, 232, 0.08),
+        0 32px 80px rgba(0, 0, 0, 0.7),
+        0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DIAGONAL TEAL PANEL
+   Clips a teal gradient to a diagonal half of the card.
+   On Sign-In (default): teal is on the RIGHT side.
+   On Sign-Up (.toggled): teal moves to the LEFT side.
+   The clip-path creates the sharp 135° diagonal edge.
+═══════════════════════════════════════════════════════════ */
+.deco-panel {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, #0a7a8f 0%, #00d4e8 100%);
+    /* default (Sign In): teal on RIGHT — diagonal line from 81% top to 19% bottom */
+    clip-path: polygon(81% 0, 100% 0, 100% 100%, 19% 100%);
+    transition: clip-path 1.2s cubic-bezier(0.65, 0, 0.35, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* toggled (Sign Up): teal on LEFT — diagonal line from 81% top to 19% bottom */
+.auth-wrapper.toggled .deco-panel {
+    clip-path: polygon(0 0, 81% 0, 19% 100%, 0 100%);
+}
+
+/* ── Welcome text inside teal ── */
+.deco-text {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+/* "WELCOME BACK!" sits in the RIGHT half */
+.deco-text.signin {
+    right: 0;
+    width: 50%;
+    height: 100%;
+    transition: opacity 0.35s ease;
+    opacity: 1;
+}
+
+.auth-wrapper.toggled .deco-text.signin {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* "JOIN US!" sits in the LEFT half */
+.deco-text.signup {
+    left: 0;
+    width: 50%;
+    height: 100%;
+    opacity: 0;
+    transition: opacity 0.35s ease 0.75s;
+}
+
+.auth-wrapper.toggled .deco-text.signup {
+    opacity: 1;
+}
+
+.deco-text h2 {
+    font-size: 26px;
+    font-weight: 800;
+    color: #ffffff;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    line-height: 1.4;
+    text-align: center;
+    padding: 0 40px;
+    text-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FORM PANELS — one for sign-in (left), one for sign-up (right)
+   Both are absolutely positioned, z-index above teal panel.
+═══════════════════════════════════════════════════════════ */
+.form-panel {
+    position: absolute;
+    top: 0;
+    width: 50%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    padding: 40px 48px;
+}
+
+.form-panel.signin { left: 0; }
+.form-panel.signup { right: 0; }
+
+/* Sign-in panel: visible by default, hides when toggled */
+.form-panel.signin {
+    opacity: 1;
+    transform: translateX(0);
+    transition: opacity 0.4s ease 0.8s, transform 0.5s ease 0.8s;
+}
+.auth-wrapper.toggled .form-panel.signin {
+    opacity: 0;
+    transform: translateX(-40px);
+    transition: opacity 0.3s ease, transform 0.4s ease;
+    pointer-events: none;
+}
+
+/* Sign-up panel: hidden by default, shows when toggled */
+.form-panel.signup {
+    opacity: 0;
+    transform: translateX(40px);
+    transition: opacity 0.3s ease, transform 0.4s ease;
+}
+.auth-wrapper.toggled .form-panel.signup {
+    opacity: 1;
+    transform: translateX(0);
+    transition: opacity 0.4s ease 0.8s, transform 0.5s ease 0.8s;
+}
+
+/* ── Inner form box — vertically centered, max 360px ── */
+.form-inner {
+    width: 100%;
+    max-width: 360px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PANEL HEADINGS
+═══════════════════════════════════════════════════════════ */
+.panel-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+    margin-bottom: 6px;
+}
+
+.panel-sub {
+    font-size: 14px;
+    font-weight: 400;
+    color:white;
+    line-height: 1.5;
+    margin-bottom: 0;
+    white-space: normal;          /* never clip subtitle text */
+    overflow: visible;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FORM GRID — strict vertical stack
+═══════════════════════════════════════════════════════════ */
+.auth-form {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    margin-top: 28px;
+}
+
+/* ── Field wrapper ── */
+.saas-field {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    margin-bottom: 16px;
+    width: 100%;
+}
+
+/* ── Label ── */
+.saas-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #e5e7eb;                /* Brighter color for visibility */
+    letter-spacing: 0.1px;
+    user-select: none;
+}
+
+/* ── Input wrapper (relative for eye icon) ── */
+.saas-input-wrap {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+}
+
+/* ── Input ── */
+.saas-input {
+    width: 100%;
+    height: 48px;
+    padding: 0 16px;
+    background: #1a2235;
+    border: 1px solid #2a3a55;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 400;
+    color: #ffffff;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.saas-input::placeholder { color: #4a5a72; }
+
+/* password — make room for eye icon */
+.saas-input.has-eye { padding-right: 48px; }
+
+/* Focus */
+.saas-input:focus {
+    border-color: #00d4e8;
+    box-shadow: 0 0 0 3px rgba(0, 212, 232, 0.12);
+}
+
+/* Filled */
+.saas-input:not(:placeholder-shown):not(:focus) {
+    border-color: rgba(0, 212, 232, 0.3);
+}
+
+/* ── Eye toggle — password ONLY ── */
+.eye-toggle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #4a5a72;
+    border-radius: 0 8px 8px 0;
+    transition: color 0.2s ease;
+    z-index: 1;
+    flex-shrink: 0;
+    padding: 0;
+}
+.eye-toggle:hover { color: #00d4e8; }
+.eye-toggle svg {
+    display: block;
+    width: 17px; height: 17px;
+    pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SUBMIT BUTTON
+═══════════════════════════════════════════════════════════ */
+.submit-button {
+    width: 100%;
+    height: 50px;
+    margin-top: 8px;
+    background: transparent;
+    border: 1px solid #00d4e8;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    color: #00d4e8;
+    letter-spacing: 0.2px;
+    transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease;
+}
+.submit-button:hover:not(:disabled) {
+    background: rgba(0, 212, 232, 0.1);
+    box-shadow: 0 0 20px rgba(0, 212, 232, 0.2);
+    color: #fff;
+}
+.submit-button:active:not(:disabled) { transform: scale(0.985); }
+.submit-button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ═══════════════════════════════════════════════════════════
+   SWITCH LINK
+═══════════════════════════════════════════════════════════ */
+.switch-link {
+    margin-top: 18px;
+    text-align: center;
+    font-size: 13px;
+    color: #6b7280;
+    line-height: 1.5;
+}
+.switch-link a {
+    color: #00d4e8;
+    font-weight: 600;
+    text-decoration: none;
+    transition: color 0.2s;
+}
+.switch-link a:hover { color: #fff; }
+
+/* ═══════════════════════════════════════════════════════════
+   ERROR BOX
+═══════════════════════════════════════════════════════════ */
+.auth-error {
+    width: 100%;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #f87171;
+    line-height: 1.45;
+    margin-bottom: 14px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FOOTER
+═══════════════════════════════════════════════════════════ */
+.auth-footer {
+    margin-top: 20px;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.2);
+}
+.auth-footer a {
+    color: #00d4e8;
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.2s;
+}
+.auth-footer a:hover { color: #fff; }
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE — tablet (≤ 860px): collapse to single-column card
+═══════════════════════════════════════════════════════════ */
+@media (max-width: 860px) {
+    .auth-wrapper {
+        max-width: 460px;
+        height: auto;
+        min-height: 0;
+    }
+
+    /* hide teal decoration at small sizes */
+    .deco-panel { display: none; }
+
+    /* stack form panels vertically, show one at a time */
+    .form-panel {
+        position: relative;
+        width: 100%;
+        left: auto; right: auto;
+        padding: 40px 32px;
+    }
+
+    /* reset transitions — use display show/hide */
+    .form-panel.signin,
+    .form-panel.signup {
+        transition: none;
+        transform: none;
+    }
+
+    .form-panel.signup { opacity: 1; }
+
+    /* hide inactive panel */
+    .auth-wrapper:not(.toggled) .form-panel.signup { display: none; }
+    .auth-wrapper.toggled      .form-panel.signin  { display: none; }
+
+    /* Center text better on mobile */
+    .panel-title { text-align: center; }
+    .panel-sub { text-align: center; margin-bottom: 24px; }
+}
+
+@media (max-width: 479px) {
+    .auth-page-container { padding: 16px 12px; }
+    .form-panel { padding: 32px 24px; }
+    .panel-title { font-size: 24px; }
+    .saas-input  { height: 46px; }
+    .submit-button { height: 46px; }
+    .saas-field  { margin-bottom: 14px; }
+}

@@ -8,20 +8,54 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [isBlocked, setIsBlocked] = useState(false);
 
     useEffect(() => {
-        // Check if user is logged in
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-            setUser(JSON.parse(storedUser));
-        }
-        setLoading(false);
+        const verifyUser = async () => {
+            const storedUser = localStorage.getItem('user');
+            if (storedUser) {
+                const parsedUser = JSON.parse(storedUser);
+                try {
+                    const res = await axios.get('http://localhost:5000/api/auth/me', {
+                        headers: { Authorization: `Bearer ${parsedUser.token}` }
+                    });
+                    
+                    // Update user state with verified data (including true role)
+                    const verifiedUser = { ...res.data, token: parsedUser.token };
+                    setUser(verifiedUser);
+                    localStorage.setItem('user', JSON.stringify(verifiedUser));
+                } catch (error) {
+                    console.error('Session invalid:', error);
+                    localStorage.removeItem('user');
+                    setUser(null);
+                }
+            }
+            setLoading(false);
+        };
+
+        verifyUser();
+    }, []);
+
+    // Axios interceptor to catch blocked responses
+    useEffect(() => {
+        const interceptor = axios.interceptors.response.use(
+            response => response,
+            error => {
+                if (error.response?.status === 403 && error.response?.data?.blocked) {
+                    setIsBlocked(true);
+                }
+                return Promise.reject(error);
+            }
+        );
+
+        return () => axios.interceptors.response.eject(interceptor);
     }, []);
 
     const login = async (email, password) => {
         try {
             const res = await axios.post('http://localhost:5000/api/auth/login', { email, password });
             setUser(res.data);
+            setIsBlocked(false);
             localStorage.setItem('user', JSON.stringify(res.data));
             return { success: true };
         } catch (error) {
@@ -33,6 +67,7 @@ export const AuthProvider = ({ children }) => {
         try {
             const res = await axios.post('http://localhost:5000/api/auth/register', { name, email, password, role });
             setUser(res.data);
+            setIsBlocked(false);
             localStorage.setItem('user', JSON.stringify(res.data));
             return { success: true };
         } catch (error) {
@@ -42,12 +77,13 @@ export const AuthProvider = ({ children }) => {
 
     const logout = () => {
         setUser(null);
+        setIsBlocked(false);
         localStorage.removeItem('user');
         window.location.href = '/login';
     };
 
     return (
-        <AuthContext.Provider value={{ user, login, register, logout, loading }}>
+        <AuthContext.Provider value={{ user, login, register, logout, loading, isBlocked, setIsBlocked }}>
             {!loading && children}
         </AuthContext.Provider>
     );

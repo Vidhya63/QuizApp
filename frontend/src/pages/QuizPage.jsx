@@ -1,8 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
+/* ── Confetti ─────────────────────────────────────────── */
+const Confetti = () => {
+    const COLORS = ['#6c63ff','#a29bfe','#fd79a8','#fdcb6e','#00b894','#e17055','#74b9ff','#ff7675'];
+    const pieces = Array.from({ length: 55 }, (_, i) => ({
+        id: i, left: Math.random() * 100,
+        delay: Math.random() * 2.5, duration: 2.4 + Math.random() * 2,
+        color: COLORS[i % COLORS.length], size: 7 + Math.random() * 8,
+        round: Math.random() > 0.5,
+    }));
+    return <>
+        {pieces.map(p => (
+            <div key={p.id} className="confetti" style={{
+                left: `${p.left}%`, top: '-10px',
+                width: p.size, height: p.size,
+                borderRadius: p.round ? '50%' : 3,
+                background: p.color,
+                animationDelay: `${p.delay}s`,
+                animationDuration: `${p.duration}s`,
+            }} />
+        ))}
+    </>;
+};
+
+/* ── Main Component ───────────────────────────────────── */
 const QuizPage = () => {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -15,168 +39,378 @@ const QuizPage = () => {
     const [timeLeft, setTimeLeft] = useState(0);
     const [submitting, setSubmitting] = useState(false);
     const [result, setResult] = useState(null);
+    const [quizStarted, setQuizStarted] = useState(false);
+    const [flagCount, setFlagCount] = useState(0);
+    const [warningMsg, setWarningMsg] = useState('');
+    const [isResuming, setIsResuming] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [showConfetti, setShowConfetti] = useState(false);
+    const [currentQ, setCurrentQ] = useState(0);
 
+    const flagCountRef  = useRef(0);
+    const quizStartedRef = useRef(false);
+    const answersRef    = useRef({});
+    const submittingRef = useRef(false);
+    const resultRef     = useRef(null);
+    const warningTimer  = useRef(null);
+
+    useEffect(() => { answersRef.current   = answers;    }, [answers]);
+    useEffect(() => { quizStartedRef.current = quizStarted; }, [quizStarted]);
+    useEffect(() => { submittingRef.current  = submitting;   }, [submitting]);
+    useEffect(() => { resultRef.current      = result;       }, [result]);
+
+    const showWarning = (msg) => {
+        clearTimeout(warningTimer.current);
+        setWarningMsg(msg);
+        warningTimer.current = setTimeout(() => setWarningMsg(''), 5000);
+    };
+
+    const reportFlag = useCallback(async (flagType) => {
+        try {
+            const res = await axios.post('http://localhost:5000/api/quiz/flag',
+                { quizId: id, flagType },
+                { headers: { Authorization: `Bearer ${user.token}` } }
+            );
+            flagCountRef.current = res.data.flagCount;
+            setFlagCount(res.data.flagCount);
+            return res.data.flagCount;
+        } catch { return flagCountRef.current; }
+    }, [id, user.token]);
+
+    /* Load quiz info */
     useEffect(() => {
-        const fetchQuizAndQuestions = async () => {
-            try {
-                const res = await axios.post('http://localhost:5000/api/quiz/start', { quizId: id }, {
-                    headers: { Authorization: `Bearer ${user.token}` }
-                });
-
+        axios.post('http://localhost:5000/api/quiz/info', { quizId: id }, { headers: { Authorization: `Bearer ${user.token}` } })
+            .then(res => {
                 setQuiz(res.data.quiz);
-                setQuestions(res.data.questions);
-
-                // Calculate timer
-                // Store end time in localStorage to persist across reloads
-                const storageKey = `quiz_end_time_${id}`;
-                let endTime = localStorage.getItem(storageKey);
-
-                if (!endTime) {
-                    endTime = Date.now() + res.data.quiz.duration * 60 * 1000;
-                    localStorage.setItem(storageKey, endTime);
+                if (res.data.status === 'resuming' && res.data.savedState) {
+                    setQuestions(res.data.questions);
+                    setAnswers(res.data.savedState.answers || {});
+                    setTimeLeft(res.data.savedState.timeRemaining);
+                    setIsResuming(true);
+                } else {
+                    setTimeLeft(res.data.quiz.duration * 60);
                 }
-
-                const remaining = Math.max(0, Math.floor((parseInt(endTime) - Date.now()) / 1000));
-                setTimeLeft(remaining);
-
-            } catch (error) {
-                console.error('Error fetching quiz:', error);
-                alert(error.response?.data?.message || 'Error starting quiz');
-                navigate('/');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchQuizAndQuestions();
+            })
+            .catch(err => { alert(err.response?.data?.message || 'Error loading quiz'); navigate('/'); })
+            .finally(() => setLoading(false));
     }, [id, user.token, navigate]);
 
+    /* Timer */
     useEffect(() => {
-        if (loading || submitting || result) return;
+        if (!quizStarted || submitting || result) return;
+        if (timeLeft <= 0) { handleSubmit(true); return; }
+        const t = setInterval(() => setTimeLeft(p => p - 1), 1000);
+        return () => clearInterval(t);
+    }, [timeLeft, quizStarted, submitting, result]);
 
-        if (timeLeft <= 0) {
-            handleSubmit();
-            return;
-        }
+    /* Auto-save every 10s */
+    useEffect(() => {
+        if (!quizStarted || submitting || result) return;
+        const t = setInterval(async () => {
+            try {
+                setIsSaving(true);
+                await axios.post('http://localhost:5000/api/quiz/save',
+                    { quizId: id, answers: answersRef.current, timeRemaining: timeLeft },
+                    { headers: { Authorization: `Bearer ${user.token}` } }
+                );
+            } catch { } finally { setTimeout(() => setIsSaving(false), 600); }
+        }, 10000);
+        return () => clearInterval(t);
+    }, [quizStarted, submitting, result, id, user.token, timeLeft]);
 
-        const timer = setInterval(() => {
-            setTimeLeft(prev => prev - 1);
-        }, 1000);
+    /* Anti-cheat */
+    useEffect(() => {
+        const onViz = async () => {
+            if (document.hidden && quizStartedRef.current && !submittingRef.current && !resultRef.current) {
+                const count = await reportFlag('tab_switch');
+                if (count >= 3) handleSubmit(true);
+                else showWarning(`⚠ Tab switch detected · Flag ${count}/3`);
+            }
+        };
+        const onFS = async () => {
+            const inFS = !!document.fullscreenElement;
+            setIsFullscreen(inFS);
+            if (!inFS && quizStartedRef.current && !submittingRef.current && !resultRef.current) {
+                const count = await reportFlag('fullscreen_exit');
+                if (count >= 3) handleSubmit(true);
+                else showWarning(`⚠ Fullscreen exited · Flag ${count}/3`);
+            }
+        };
+        const onKey = (e) => {
+            if (e.ctrlKey && ['c','v','a'].includes(e.key.toLowerCase())) {
+                e.preventDefault();
+                showWarning('Shortcuts disabled during quiz.');
+            }
+        };
+        document.addEventListener('visibilitychange', onViz);
+        document.addEventListener('fullscreenchange', onFS);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('visibilitychange', onViz);
+            document.removeEventListener('fullscreenchange', onFS);
+            document.removeEventListener('keydown', onKey);
+        };
+    }, [reportFlag]);
 
-        return () => clearInterval(timer);
-    }, [timeLeft, loading, submitting, result]);
-
-    const handleOptionSelect = (questionId, option) => {
-        setAnswers(prev => ({
-            ...prev,
-            [questionId]: option
-        }));
+    const enterFullscreen = async () => {
+        try { await document.documentElement.requestFullscreen(); setIsFullscreen(true); setWarningMsg(''); }
+        catch { alert('Please allow fullscreen to continue.'); }
     };
 
-    const handleSubmit = async () => {
-        if (submitting) return;
+    const handleStartQuiz = async () => {
+        try {
+            await document.documentElement.requestFullscreen();
+            setIsFullscreen(true);
+            if (isResuming) {
+                setQuizStarted(true);
+            } else {
+                const res = await axios.post('http://localhost:5000/api/quiz/start', { quizId: id }, { headers: { Authorization: `Bearer ${user.token}` } });
+                setQuestions(res.data.questions);
+                setTimeLeft(res.data.quiz.duration * 60);
+                setQuizStarted(true);
+            }
+        } catch (err) {
+            if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+            alert(err.response?.data?.message || 'Fullscreen required. Please try again.');
+        }
+    };
+
+    const handleOptionSelect = async (questionId, option) => {
+        const newAnswers = { ...answers, [questionId]: option };
+        setAnswers(newAnswers);
+        try {
+            setIsSaving(true);
+            await axios.post('http://localhost:5000/api/quiz/save',
+                { quizId: id, answers: newAnswers, timeRemaining: timeLeft },
+                { headers: { Authorization: `Bearer ${user.token}` } }
+            );
+        } catch { } finally { setTimeout(() => setIsSaving(false), 600); }
+    };
+
+    const handleSubmit = async (force = false) => {
+        if (submittingRef.current) return;
         setSubmitting(true);
-
-        const formattedAnswers = Object.keys(answers).map(qId => ({
-            questionId: qId,
-            selectedOption: answers[qId]
-        }));
-
+        const cur = force ? answersRef.current : answers;
+        const formatted = Object.keys(cur).map(qId => ({ questionId: qId, selectedOption: cur[qId] }));
         try {
             const res = await axios.post('http://localhost:5000/api/quiz/submit', {
-                quizId: id,
-                answers: formattedAnswers
-            }, {
-                headers: { Authorization: `Bearer ${user.token}` }
-            });
-
-            localStorage.removeItem(`quiz_end_time_${id}`);
-            setResult(res.data);
-        } catch (error) {
-            console.error('Error submitting quiz:', error);
-            alert('Error submitting quiz');
-        } finally {
-            setSubmitting(false);
-        }
+                quizId: id, answers: formatted,
+                isSuspicious: flagCountRef.current > 0 || force,
+                tabSwitches: flagCountRef.current, fullscreenExits: 0,
+            }, { headers: { Authorization: `Bearer ${user.token}` } });
+            if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+            setResult(res.data); setShowConfetti(true);
+            setTimeout(() => setShowConfetti(false), 4500);
+        } catch { alert('Error submitting quiz.'); }
+        finally { setSubmitting(false); }
     };
 
-    const formatTime = (seconds) => {
-        const m = Math.floor(seconds / 60);
-        const s = seconds % 60;
-        return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    };
+    const fmt = (s) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+    const answered = Object.keys(answers).length;
+    const progress = questions.length > 0 ? (answered / questions.length) * 100 : 0;
+    const LETTERS = ['A','B','C','D','E'];
 
-    if (loading) return <div className="text-center mt-20 text-xl font-bold">Loading your questions...</div>;
+    /* ── LOADING ── */
+    if (loading) return (
+        <div style={{ minHeight: '60dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <div className="brand-logo" style={{ fontSize: 22 }}>SVHEC</div>
+            <p style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>Loading your quiz…</p>
+        </div>
+    );
 
-    if (result) {
-        return (
-            <div className="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md text-center">
-                <h2 className="text-3xl font-bold mb-4 text-indigo-600">Quiz Completed!</h2>
-                <div className="bg-indigo-50 border border-indigo-200 rounded p-6 mb-6">
-                    <p className="text-xl text-gray-800">Your results have been recorded and will be available once the admin publishes them.</p>
+    /* ── RESULT ── */
+    if (result) return (
+        <div style={{ minHeight: '80dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+            {showConfetti && <Confetti />}
+            <div className="card anim-pop" style={{ maxWidth: 460, width: '100%', padding: 'clamp(32px,6vw,52px)', textAlign: 'center' }}>
+                <div style={{ width: 88, height: 88, borderRadius: '50%', margin: '0 auto 24px', background: 'rgba(48,209,88,0.1)', border: '2px solid rgba(48,209,88,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 40px rgba(48,209,88,0.12)' }}>
+                    <svg width="44" height="44" fill="none" stroke="#30d158" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 </div>
-                <button
-                    onClick={() => navigate('/my-results')}
-                    className="bg-indigo-600 text-white px-6 py-3 rounded-md hover:bg-indigo-700 font-bold mr-4"
-                >
-                    My Results
-                </button>
-                <button
-                    onClick={() => navigate('/')}
-                    className="bg-gray-200 text-gray-800 px-6 py-3 rounded-md hover:bg-gray-300 font-bold"
-                >
-                    Go Dashboard
+                <h2 style={{ fontSize: 'clamp(20px,4vw,26px)', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 10 }}>Quiz Submitted! 🎉</h2>
+                <p style={{ color: 'var(--color-text-secondary)', fontSize: 15, lineHeight: 1.65, marginBottom: 24 }}>
+                    Your answers have been saved. Results will be published by the admin.
+                </p>
+                {flagCount > 0 && (
+                    <div style={{ padding: '10px 16px', marginBottom: 20, borderRadius: 12, background: 'rgba(255,159,10,0.1)', border: '1px solid rgba(255,159,10,0.25)', color: '#a05800', fontSize: 13 }}>
+                        ⚠ {flagCount} flag event{flagCount > 1 ? 's' : ''} recorded during this session.
+                    </div>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <button className="btn btn-primary btn-full" style={{ padding: 15, fontSize: 16 }} onClick={() => navigate('/my-results')}>View My Results</button>
+                    <button className="btn btn-ghost btn-full" onClick={() => navigate('/')}>← Back to Dashboard</button>
+                </div>
+            </div>
+        </div>
+    );
+
+    /* ── START SCREEN ── */
+    if (!quizStarted) return (
+        <div style={{ minHeight: '75dvh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div className="card anim-up" style={{ maxWidth: 500, width: '100%', padding: 'clamp(28px,6vw,44px)' }}>
+                <div style={{ width: 60, height: 60, borderRadius: 18, background: 'linear-gradient(135deg,#6c63ff,#a29bfe)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 22px', boxShadow: '0 8px 24px rgba(108,99,255,0.28)' }}>
+                    <svg width="28" height="28" fill="none" stroke="white" strokeWidth="1.8" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" /></svg>
+                </div>
+                <h1 style={{ fontSize: 'clamp(18px,3.5vw,22px)', fontWeight: 700, textAlign: 'center', letterSpacing: '-0.02em', marginBottom: 6 }}>{quiz?.title}</h1>
+                <p style={{ color: 'var(--color-text-secondary)', textAlign: 'center', fontSize: 14, marginBottom: 24 }}>
+                    {quiz?.duration} minutes · {isResuming ? 'Resuming session' : 'New session'}
+                </p>
+                {isResuming && (
+                    <div style={{ padding: '14px 18px', marginBottom: 18, borderRadius: 14, background: 'rgba(108,99,255,0.06)', border: '1px solid rgba(108,99,255,0.14)' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--brand-accent)', marginBottom: 4, fontSize: 14 }}>🔄 Session Restored</div>
+                        <p style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>Your previous answers and remaining time have been restored.</p>
+                    </div>
+                )}
+                <div style={{ padding: '14px 18px', marginBottom: 24, borderRadius: 14, background: 'rgba(255,159,10,0.06)', border: '1px solid rgba(255,159,10,0.18)' }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#6b4800' }}>Before you begin</div>
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: '#7a5500', lineHeight: 2 }}>
+                        <li>Stay in <strong>fullscreen</strong> throughout the quiz</li>
+                        <li>Do <strong>not</strong> switch tabs or minimize window</li>
+                        <li><strong>3 flags = automatic submission</strong></li>
+                        <li>Your activity is monitored in real-time</li>
+                        <li>Answers auto-save every 10 seconds</li>
+                    </ul>
+                </div>
+                <button className="btn btn-primary btn-full" style={{ padding: 15, fontSize: 16 }} onClick={handleStartQuiz}>
+                    🖥 Enter Fullscreen & {isResuming ? 'Resume' : 'Start'} Quiz
                 </button>
             </div>
-        );
-    }
+        </div>
+    );
+
+    /* ── ACTIVE QUIZ ── */
+    const curQ = questions[currentQ];
 
     return (
-        <div className="max-w-3xl mx-auto">
-            <div className="sticky top-0 bg-white z-10 p-4 rounded-lg shadow mb-6 flex justify-between items-center border-b-4 border-indigo-500">
-                <h2 className="text-xl font-bold text-gray-800">{quiz?.title}</h2>
-                <div className={`text-xl font-mono font-bold px-4 py-2 rounded ${timeLeft < 60 ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-800'}`}>
-                    Time Left: {formatTime(timeLeft)}
+        <div className="no-select" style={{ maxWidth: 720, margin: '0 auto' }}
+            onContextMenu={e => { e.preventDefault(); showWarning('Right-click disabled.'); }}
+            onCopy={e => e.preventDefault()} onPaste={e => e.preventDefault()}>
+
+            {/* Fullscreen overlay */}
+            {!isFullscreen && !result && (
+                <div style={{
+                    position: 'fixed', inset: 0, zIndex: 200,
+                    background: 'rgba(5,5,20,0.96)', backdropFilter: 'blur(20px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+                }}>
+                    <div className="card anim-pop" style={{ maxWidth: 360, width: '100%', padding: '40px 28px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 52, marginBottom: 18 }}>🖥</div>
+                        <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-danger)', marginBottom: 10 }}>Quiz Paused</h2>
+                        <p style={{ color: 'var(--color-text-secondary)', fontSize: 14, marginBottom: 8, lineHeight: 1.6 }}>Fullscreen mode is required to continue.</p>
+                        <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 22, color: flagCount >= 2 ? 'var(--color-danger)' : 'var(--color-warning)' }}>
+                            🚩 Flags: {flagCount}/3 {flagCount >= 2 ? '— One more ends the quiz!' : ''}
+                        </p>
+                        <button className="btn btn-primary btn-full" style={{ padding: 14 }} onClick={enterFullscreen}>Return to Fullscreen →</button>
+                    </div>
+                </div>
+            )}
+
+            {/* Warning Banner */}
+            {warningMsg && isFullscreen && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100, background: 'var(--color-danger)', color: 'white', padding: '12px 20px', textAlign: 'center', fontWeight: 600, fontSize: 14 }}>
+                    {warningMsg}
+                </div>
+            )}
+
+            {/* Sticky Header Bar */}
+            <div style={{
+                position: 'sticky', top: 0, zIndex: 10, marginBottom: 20,
+                background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(20px)',
+                borderRadius: 18, padding: '12px 18px',
+                border: '1px solid var(--color-border)',
+                boxShadow: '0 2px 20px rgba(0,0,0,0.06)',
+                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+            }}>
+                {/* Progress */}
+                <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                        <span>{answered}/{questions.length} answered</span>
+                        {isSaving && <span style={{ color: 'var(--color-success)' }}>✓ Saving</span>}
+                    </div>
+                    <div style={{ height: 4, background: '#eee', borderRadius: 100, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', borderRadius: 100, background: 'linear-gradient(90deg,#6c63ff,#a29bfe)', width: `${progress}%`, transition: 'width 0.5s ease' }} />
+                    </div>
+                </div>
+
+                {flagCount > 0 && (
+                    <span className={`badge ${flagCount >= 2 ? 'badge-red' : 'badge-yellow'}`}>🚩 {flagCount}/3</span>
+                )}
+
+                {/* Timer */}
+                <div className={`timer ${timeLeft < 60 ? 'danger' : timeLeft < 300 ? 'warn' : ''}`}>
+                    {fmt(timeLeft)}
                 </div>
             </div>
 
-            <div className="space-y-6">
-                {questions.map((q, index) => (
-                    <div key={q._id} className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                        <h3 className="text-lg font-medium text-gray-900 mb-4">
-                            <span className="text-indigo-600 font-bold mr-2">{index + 1}.</span>
-                            {q.question}
-                        </h3>
-                        <div className="space-y-3">
-                            {q.options.map((opt, i) => (
-                                <label
-                                    key={i}
-                                    className={`flex items-center p-3 rounded cursor-pointer border hover:bg-indigo-50 transition border-gray-200 ${answers[q._id] === opt ? 'bg-indigo-50 border-indigo-400 border-2' : ''}`}
-                                >
-                                    <input
-                                        type="radio"
-                                        name={`question-${q._id}`}
-                                        value={opt}
-                                        checked={answers[q._id] === opt}
-                                        onChange={() => handleOptionSelect(q._id, opt)}
-                                        className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500 mr-3"
-                                    />
-                                    <span className="text-gray-700">{opt}</span>
-                                </label>
-                            ))}
-                        </div>
-                    </div>
+            {/* Question Nav Pills (scroll on mobile) */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 18, overflowX: 'auto', paddingBottom: 4 }}>
+                {questions.map((q, i) => (
+                    <button key={q._id} onClick={() => setCurrentQ(i)} style={{
+                        minWidth: 34, height: 34, borderRadius: 9, flexShrink: 0,
+                        border: i === currentQ ? '2px solid var(--brand-accent)' : '1.5px solid var(--color-border)',
+                        background: answers[q._id] ? 'linear-gradient(135deg,#6c63ff,#a29bfe)' : i === currentQ ? 'rgba(108,99,255,0.08)' : 'var(--color-surface)',
+                        color: answers[q._id] ? 'white' : i === currentQ ? 'var(--brand-accent)' : 'var(--color-text-secondary)',
+                        fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                        transition: 'all var(--dur-fast) var(--ease-out)',
+                        boxShadow: i === currentQ ? '0 4px 10px rgba(108,99,255,0.2)' : 'none',
+                    }}>
+                        {i + 1}
+                    </button>
                 ))}
             </div>
 
-            <div className="mt-8 mb-20 flex justify-end">
-                <button
-                    onClick={handleSubmit}
-                    disabled={submitting}
-                    className="bg-green-600 text-white px-8 py-3 rounded hover:bg-green-700 font-bold text-lg disabled:opacity-50"
-                >
-                    {submitting ? 'Submitting...' : 'Submit Quiz'}
+            {/* Question Card */}
+            {curQ && (
+                <div key={currentQ} className="card" style={{ padding: 'clamp(22px,5vw,36px)', marginBottom: 18, animation: 'pageIn 0.28s ease both' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+                        <span className="badge badge-purple">Q {currentQ + 1} / {questions.length}</span>
+                    </div>
+                    <h2 style={{ fontSize: 'clamp(16px,3.5vw,20px)', fontWeight: 600, lineHeight: 1.55, letterSpacing: '-0.01em', marginBottom: 'clamp(20px,4vw,28px)', color: 'var(--color-text-primary)' }}>
+                        {curQ.question}
+                    </h2>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {curQ.options.map((opt, i) => {
+                            const sel = answers[curQ._id] === opt;
+                            return (
+                                <div key={i} className={`q-option${sel ? ' selected' : ''}`} onClick={() => handleOptionSelect(curQ._id, opt)}>
+                                    <div className="q-option-letter">{LETTERS[i]}</div>
+                                    <span style={{ fontSize: 'clamp(14px,3vw,15px)', fontWeight: sel ? 500 : 400, lineHeight: 1.45, flex: 1 }}>{opt}</span>
+                                    {sel && (
+                                        <svg style={{ flexShrink: 0 }} width="18" height="18" fill="none" stroke="var(--brand-accent)" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {/* Navigation */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, paddingBottom: 40, flexWrap: 'wrap' }}>
+                <button className="btn btn-ghost" disabled={currentQ === 0} onClick={() => setCurrentQ(p => Math.max(0, p-1))} style={{ opacity: currentQ === 0 ? 0.4 : 1 }}>
+                    ← Previous
                 </button>
+
+                <div style={{ display: 'flex', gap: 10 }}>
+                    {currentQ < questions.length - 1 ? (
+                        <button className="btn btn-primary" onClick={() => setCurrentQ(p => Math.min(questions.length-1, p+1))}>
+                            Next →
+                        </button>
+                    ) : (
+                        <button
+                            onClick={() => handleSubmit(false)} disabled={submitting}
+                            style={{
+                                padding: '12px 28px', borderRadius: 18, border: 'none',
+                                background: submitting ? '#ccc' : 'linear-gradient(135deg,#30d158,#00b894)',
+                                color: 'white', fontWeight: 700, fontSize: 16, fontFamily: 'inherit',
+                                cursor: submitting ? 'not-allowed' : 'pointer',
+                                boxShadow: '0 4px 18px rgba(48,209,88,0.35)',
+                                transition: 'all 200ms ease',
+                            }}>
+                            {submitting ? 'Submitting…' : '✓ Submit Quiz'}
+                        </button>
+                    )}
+                </div>
             </div>
         </div>
     );

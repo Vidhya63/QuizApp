@@ -9,6 +9,10 @@ const submissionSchema = new mongoose.Schema({
         isCorrect: { type: Boolean, required: true }
     }],
     score: { type: Number, required: true },
+    isSuspicious: { type: Boolean, default: false },
+    tabSwitches: { type: Number, default: 0 },
+    fullscreenExits: { type: Number, default: 0 },
+    attemptNumber: { type: Number, default: 1 },
     submittedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 

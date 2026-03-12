@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
 
 export const protect = async (req, res, next) => {
     let token;
@@ -6,16 +7,25 @@ export const protect = async (req, res, next) => {
         try {
             token = req.headers.authorization.split(' ')[1];
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            req.user = decoded; // add user id and role to req object
-            next();
+            req.user = decoded;
+
+            // Check if user is blocked (skip for admin hardcoded id)
+            if (decoded.id !== 'admin-id') {
+                const dbUser = await User.findById(decoded.id).select('isBlocked');
+                if (dbUser && dbUser.isBlocked) {
+                    return res.status(403).json({ message: 'Your account has been blocked by the admin.', blocked: true });
+                }
+            }
+
+            return next();
         } catch (error) {
             console.error(error);
-            res.status(401).json({ message: 'Not authorized, token failed' });
+            return res.status(401).json({ message: 'Not authorized, token failed' });
         }
     }
 
     if (!token) {
-        res.status(401).json({ message: 'Not authorized, no token' });
+        return res.status(401).json({ message: 'Not authorized, no token' });
     }
 };
 

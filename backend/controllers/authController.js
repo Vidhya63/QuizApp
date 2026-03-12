@@ -1,6 +1,7 @@
 import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import AppSettings from '../models/AppSettings.js';
 
 const generateToken = (id, role) => {
     return jwt.sign({ id, role }, process.env.JWT_SECRET, {
@@ -9,9 +10,19 @@ const generateToken = (id, role) => {
 };
 
 export const registerUser = async (req, res) => {
-    const { name, email, password, role } = req.body;
+    const { name, email, password } = req.body;
 
     try {
+        // Check if registration is open
+        let settings = await AppSettings.findOne();
+        if (settings && !settings.registrationOpen) {
+            return res.status(403).json({ message: 'Registration is currently closed by the admin.' });
+        }
+
+        if (email === 'dharsan@admin.com') {
+            return res.status(400).json({ message: 'Cannot register with admin email' });
+        }
+
         const userExists = await User.findOne({ email });
 
         if (userExists) {
@@ -25,7 +36,7 @@ export const registerUser = async (req, res) => {
             name,
             email,
             password: hashedPassword,
-            role: role || 'user',
+            role: 'user', // Force user role
         });
 
         if (user) {
@@ -48,9 +59,25 @@ export const loginUser = async (req, res) => {
     const { email, password } = req.body;
 
     try {
+        // Hardcoded admin login
+        if (email === 'dharsan@admin.com' && password === 'dharsan@quiz2763') {
+            return res.json({
+                _id: 'admin-id',
+                name: 'System Admin',
+                email: 'dharsan@admin.com',
+                role: 'admin',
+                token: generateToken('admin-id', 'admin'),
+            });
+        }
+
         const user = await User.findOne({ email });
 
         if (user && (await bcrypt.compare(password, user.password))) {
+            // Check if user is blocked
+            if (user.isBlocked) {
+                return res.status(403).json({ message: 'Your account has been blocked by the admin.', blocked: true });
+            }
+
             res.json({
                 _id: user._id,
                 name: user.name,
@@ -60,6 +87,37 @@ export const loginUser = async (req, res) => {
             });
         } else {
             res.status(401).json({ message: 'Invalid email or password' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Verify user token and get current user info
+export const getMe = async (req, res) => {
+    try {
+        if (req.user.id === 'admin-id') {
+            return res.json({
+                _id: 'admin-id',
+                name: 'System Admin',
+                email: 'dharsan@admin.com',
+                role: 'admin',
+            });
+        }
+        
+        const user = await User.findById(req.user.id).select('-password');
+        if (user) {
+            if (user.isBlocked) {
+                return res.status(403).json({ message: 'Your account has been blocked.', blocked: true });
+            }
+            res.json({
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+            });
+        } else {
+            res.status(404).json({ message: 'User not found' });
         }
     } catch (error) {
         res.status(500).json({ message: 'Server error', error: error.message });

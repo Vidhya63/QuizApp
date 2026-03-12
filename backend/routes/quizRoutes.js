@@ -1,13 +1,18 @@
 import express from 'express';
-import { getActiveQuizzes, startQuiz, submitQuiz, getLeaderboard, getMyResults } from '../controllers/quizController.js';
+import { getActiveQuizzes, getQuizInfo, startQuiz, submitQuiz, getLeaderboard, getPublishedLeaderboards, getMyResults, saveQuizState, verifyQuizCode, reportFlag } from '../controllers/quizController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 router.get('/', protect, getActiveQuizzes);
+router.post('/verify-code', protect, verifyQuizCode);
+router.post('/info', protect, getQuizInfo);
 router.post('/start', protect, startQuiz);
+router.post('/save', protect, saveQuizState);
 router.post('/submit', protect, submitQuiz);
-router.get('/leaderboard', protect, getLeaderboard);
+router.post('/flag', protect, reportFlag);
+router.get('/leaderboards', protect, getPublishedLeaderboards);
+router.get('/leaderboard/:quizId', protect, getLeaderboard);
 router.get('/my-results', protect, getMyResults);
 
 export default router;

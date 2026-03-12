@@ -1,13 +1,22 @@
 import express from 'express';
-import { createQuiz, addQuestion, getResults, getUsers, publishResults } from '../controllers/adminController.js';
+import { createQuiz, addQuestion, getResults, getUsers, toggleResults, toggleLeaderboard, stopQuiz, deleteQuiz, blockUser, unblockUser, getLiveAttendees, getAllQuizzes, toggleRegistration, getAppSettings } from '../controllers/adminController.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 router.post('/create-quiz', protect, admin, createQuiz);
 router.post('/add-question', protect, admin, addQuestion);
+router.get('/all-quizzes', protect, admin, getAllQuizzes);
 router.get('/results', protect, admin, getResults);
 router.get('/users', protect, admin, getUsers);
-router.post('/publish-results', protect, admin, publishResults);
+router.post('/toggle-results', protect, admin, toggleResults);
+router.post('/toggle-leaderboard', protect, admin, toggleLeaderboard);
+router.post('/stop-quiz', protect, admin, stopQuiz);
+router.delete('/delete-quiz/:quizId', protect, admin, deleteQuiz);
+router.post('/block-user', protect, admin, blockUser);
+router.post('/unblock-user', protect, admin, unblockUser);
+router.get('/live-attendees/:quizId', protect, admin, getLiveAttendees);
+router.post('/toggle-registration', protect, admin, toggleRegistration);
+router.get('/settings', getAppSettings);
 
 export default router;
