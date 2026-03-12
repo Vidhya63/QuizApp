@@ -190,8 +190,39 @@ const AdminDashboard = () => {
         const file = e.target.files[0];
         if (!file) { setQuestionImage(''); setImagePreview(''); return; }
         if (file.size > 5 * 1024 * 1024) { alert('Image must be under 5MB'); e.target.value = ''; return; }
+        // Compress image using canvas to save MongoDB Atlas storage
+        const img = new Image();
         const reader = new FileReader();
-        reader.onloadend = () => { setQuestionImage(reader.result); setImagePreview(reader.result); };
+        reader.onloadend = () => {
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const MAX = 800; // max width or height in pixels
+                let w = img.width, h = img.height;
+                if (w > MAX || h > MAX) {
+                    if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+                    else { w = Math.round(w * MAX / h); h = MAX; }
+                }
+                canvas.width = w; canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                
+                // Fill with white background to handle transparent PNGs
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, w, h);
+                ctx.drawImage(img, 0, 0, w, h);
+                
+                const compressed = canvas.toDataURL('image/jpeg', 0.8);
+                setQuestionImage(compressed);
+                setImagePreview(compressed);
+            };
+            img.onerror = () => {
+                alert('Failed to process image. Please try another one.');
+                setQuestionImage('');
+                setImagePreview('');
+                if (fileInputRef.current) fileInputRef.current.value = '';
+            };
+            img.src = reader.result;
+        };
+        reader.onerror = () => alert('Failed to read file.');
         reader.readAsDataURL(file);
     };
 
